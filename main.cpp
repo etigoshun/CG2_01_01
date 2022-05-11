@@ -6,10 +6,15 @@
 #include <string>
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
+#include <dinput.h>
+
+#define DIRECTINPUT_VERSION		0x0800	//DirectInputのバージョン指定
 
 #pragma comment(lib,"d3d12.lib")
 #pragma comment(lib,"dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib,"dinput8.lib")
+#pragma comment(lib,"dxguid.lib")
 
 using namespace DirectX;
 
@@ -39,6 +44,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	//ウィンドウサイズ
 	const int window_width = 1280;	//横幅
 	const int window_height = 720;	//縦幅
+
+	//画面クリア
+	FLOAT clearColor[] = { 0.1f,0.25f,0.5f,0.0f };	//青っぽい色
 
 	//ウィンドウクラスの設定
 	WNDCLASSEX w{};
@@ -223,6 +231,25 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
 	result = device->CreateFence(fenceVal, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
 
+	//DirectInputの初期化
+	IDirectInput8* directInput = nullptr;
+	result = DirectInput8Create(
+		w.hInstance, DIRECTINPUT_VERSION, IID_IDirectInput8,
+		(void**)&directInput, nullptr);
+	assert(SUCCEEDED(result));
+
+	IDirectInputDevice8* keyboard = nullptr;
+	result = directInput->CreateDevice(GUID_SysKeyboard, &keyboard, NULL);
+	assert(SUCCEEDED(result));
+
+	result = keyboard->SetDataFormat(&c_dfDIKeyboard);		//標準形式
+	assert(SUCCEEDED(result));
+
+	//排他制御レベルのセット
+	result = keyboard->SetCooperativeLevel(
+		hwnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE | DISCL_NOWINKEY);
+	assert(SUCCEEDED(result));
+
 	//DirectX初期化処理　ここまで
 
 	//描画初期化処理　ここから
@@ -362,8 +389,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	pipelineDesc.RasterizerState.DepthClipEnable = true; // 深度クリッピングを有効に
 
 	// ブレンドステート
-	pipelineDesc.BlendState.RenderTarget[0].RenderTargetWriteMask
-		= D3D12_COLOR_WRITE_ENABLE_ALL; // RBGA全てのチャンネルを描画
+	//pipelineDesc.BlendState.RenderTarget[0].RenderTargetWriteMask
+	//	= D3D12_COLOR_WRITE_ENABLE_ALL; // RBGA全てのチャンネルを描画
+
+	//レンダーターゲットのブレンド設定
+	//D3D12_RENDER_TARGET_BLEND_DESC& blenddesc = pipelineDesc.BlendState.RenderTarget[0];
+	//blenddesc.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;		//RGBA全てのチャンネルを描画
 
 	// 頂点レイアウトの設定
 	pipelineDesc.InputLayout.pInputElementDescs = inputLayout;
@@ -399,118 +430,148 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	result = device->CreateGraphicsPipelineState(&pipelineDesc, IID_PPV_ARGS(&pipelineState));
 	assert(SUCCEEDED(result));
 
-		//描画初期化処理　ここまで
+	//描画初期化処理　ここまで
 
 
-		//ゲームループ
-		while (true)
+	//ゲームループ
+	while (true)
+	{
+		//メッセージがある？
+		if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
 		{
-			//メッセージがある？
-			if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
-			{
-				TranslateMessage(&msg);		//キー入力メッセージの処理
-				DispatchMessage(&msg);		//プロシージャにメッセージを送る
-			}
-
-			//×ボタンで終了メッセージが来たらゲームループを抜ける
-			if (msg.message == WM_QUIT)
-			{
-				break;
-			}
-			//DirectX毎フレーム処理　ここから
-
-			//バックバッファの番号を取得(2つなので0番か1番)
-			UINT bbIndex = swapChain->GetCurrentBackBufferIndex();
-
-			// 1 リソースバリアで書き込みに変更
-			D3D12_RESOURCE_BARRIER barrierDesc{};
-			barrierDesc.Transition.pResource = backBuffers[bbIndex];					//バックバッファを指定
-			barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;			//表示状態から
-			barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;		//描画状態へ
-			commandList->ResourceBarrier(1, &barrierDesc);
-
-			// 2 描画先の変更
-			// レンダーターゲットビューのハンドルを取得
-			D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
-			rtvHandle.ptr += bbIndex * device->GetDescriptorHandleIncrementSize(rtvHeapDesc.Type);
-			commandList->OMSetRenderTargets(1, &rtvHandle, false, nullptr);
-
-			// 3 画面クリア			  R		G	 B	  A
-			FLOAT clearColor[] = { 0.1f,0.25f,0.5f,0.0f };	//青っぽい色
-			commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-
-			// 4 描画コマンドここから
-
-			// ビューポート設定コマンド
-			D3D12_VIEWPORT viewport{};
-			viewport.Width = window_width;
-			viewport.Height = window_height;
-			viewport.TopLeftX = 0;
-			viewport.TopLeftY = 0;
-			viewport.MinDepth = 0.0f;
-			viewport.MaxDepth = 1.0f;
-			// ビューポート設定コマンドを、コマンドリストに積む
-			commandList->RSSetViewports(1, &viewport);
-
-			// シザー矩形
-			D3D12_RECT scissorRect{};
-			scissorRect.left = 0; // 切り抜き座標左
-			scissorRect.right = scissorRect.left + window_width; // 切り抜き座標右
-			scissorRect.top = 0; // 切り抜き座標上
-			scissorRect.bottom = scissorRect.top + window_height; // 切り抜き座標下
-			// シザー矩形設定コマンドを、コマンドリストに積む
-			commandList->RSSetScissorRects(1, &scissorRect);
-
-			// パイプラインステートとルートシグネチャの設定コマンド
-			commandList->SetPipelineState(pipelineState);
-			commandList->SetGraphicsRootSignature(rootSignature);
-
-			// プリミティブ形状の設定コマンド
-			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // 三角形リスト
-
-			// 頂点バッファビューの設定コマンド
-			commandList->IASetVertexBuffers(0, 1, &vbView);
-
-			// 描画コマンド
-			commandList->DrawInstanced(_countof(vertices), 1, 0, 0); // 全ての頂点を使って描画
-
-			// 4 描画コマンドここまで
-
-			//リソースバリアを戻す
-			barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;	//描画状態から
-			barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;			//表示状態へ
-			commandList->ResourceBarrier(1, &barrierDesc);
-
-			//命令のクローズ
-			result = commandList->Close();
-			assert(SUCCEEDED(result));
-			//コマンドリストの実行
-			ID3D12CommandList* commandLists[] = { commandList };
-			commandQueue->ExecuteCommandLists(1, commandLists);
-
-			//画面に表示するバッファをフリップ(表示の入れ替え)
-			result = swapChain->Present(1, 0);
-			assert(SUCCEEDED(result));
-
-			// コマンドの実行完了を待つ
-			commandQueue->Signal(fence, ++fenceVal);
-			if (fence->GetCompletedValue() != fenceVal)
-			{
-				HANDLE event = CreateEvent(nullptr, false, false, nullptr);
-				fence->SetEventOnCompletion(fenceVal, event);
-				WaitForSingleObject(event, INFINITE);
-				CloseHandle(event);
-			}
-
-			//キューをクリア
-			result = commandAllocator->Reset();
-			assert(SUCCEEDED(result));
-			//再びコマンドリストを貯める準備
-			result = commandList->Reset(commandAllocator, nullptr);
-			assert(SUCCEEDED(result));
-
-			//DirectX毎フレーム処理　ここまで
+			TranslateMessage(&msg);		//キー入力メッセージの処理
+			DispatchMessage(&msg);		//プロシージャにメッセージを送る
 		}
+
+		//×ボタンで終了メッセージが来たらゲームループを抜ける
+		if (msg.message == WM_QUIT)
+		{
+			break;
+		}
+		//DirectX毎フレーム処理　ここから
+
+		//キーボード情報の取得開始
+		keyboard->Acquire();
+
+		//全キーの入力状態を取得する
+		BYTE key[256] = {};
+		keyboard->GetDeviceState(sizeof(key), key);
+
+		//数字の0キーが押されていたら
+		if (key[DIK_0])
+		{
+			OutputDebugStringA("Hit 0\n");	//出力ウィンドウに「Hit 0」と表示
+		}
+
+		if (key[DIK_SPACE])
+		{
+			clearColor[0] = { 0.0f };	//黒っぽい色
+			clearColor[1] = { 0.0f };	//黒っぽい色
+			clearColor[2] = { 0.0f };	//黒っぽい色
+			clearColor[3] = { 0.0f };	//黒っぽい色
+		}
+
+		if (!key[DIK_SPACE])
+		{
+
+			clearColor[0] = { 0.1f };	//青っぽい色
+			clearColor[1] = { 0.25f };	//青っぽい色
+			clearColor[2] = { 0.5f };	//青っぽい色
+			clearColor[3] = { 0.0f };	//青っぽい色
+		}
+
+		//バックバッファの番号を取得(2つなので0番か1番)
+		UINT bbIndex = swapChain->GetCurrentBackBufferIndex();
+
+		// 1 リソースバリアで書き込みに変更
+		D3D12_RESOURCE_BARRIER barrierDesc{};
+		barrierDesc.Transition.pResource = backBuffers[bbIndex];					//バックバッファを指定
+		barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;			//表示状態から
+		barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;		//描画状態へ
+		commandList->ResourceBarrier(1, &barrierDesc);
+
+		// 2 描画先の変更
+		// レンダーターゲットビューのハンドルを取得
+		D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+		rtvHandle.ptr += bbIndex * device->GetDescriptorHandleIncrementSize(rtvHeapDesc.Type);
+		commandList->OMSetRenderTargets(1, &rtvHandle, false, nullptr);
+
+		// 3 画面クリア			  R		G	 B	  A
+		//FLOAT clearColor[] = { 0.1f,0.25f,0.5f,0.0f };	//青っぽい色
+		commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+		// 4 描画コマンドここから
+
+		// ビューポート設定コマンド
+		D3D12_VIEWPORT viewport{};
+		viewport.Width = window_width;
+		viewport.Height = window_height;
+		viewport.TopLeftX = 0;
+		viewport.TopLeftY = 0;
+		viewport.MinDepth = 0.0f;
+		viewport.MaxDepth = 1.0f;
+		// ビューポート設定コマンドを、コマンドリストに積む
+		commandList->RSSetViewports(1, &viewport);
+
+		// シザー矩形
+		D3D12_RECT scissorRect{};
+		scissorRect.left = 0; // 切り抜き座標左
+		scissorRect.right = scissorRect.left + window_width; // 切り抜き座標右
+		scissorRect.top = 0; // 切り抜き座標上
+		scissorRect.bottom = scissorRect.top + window_height; // 切り抜き座標下
+		// シザー矩形設定コマンドを、コマンドリストに積む
+		commandList->RSSetScissorRects(1, &scissorRect);
+
+		// パイプラインステートとルートシグネチャの設定コマンド
+		commandList->SetPipelineState(pipelineState);
+		commandList->SetGraphicsRootSignature(rootSignature);
+
+		// プリミティブ形状の設定コマンド
+		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // 三角形リスト
+
+		// 頂点バッファビューの設定コマンド
+		commandList->IASetVertexBuffers(0, 1, &vbView);
+
+		// 描画コマンド
+		commandList->DrawInstanced(_countof(vertices), 1, 0, 0); // 全ての頂点を使って描画
+
+		// 4 描画コマンドここまで
+
+		//リソースバリアを戻す
+		barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;	//描画状態から
+		barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;			//表示状態へ
+		commandList->ResourceBarrier(1, &barrierDesc);
+
+		//命令のクローズ
+		result = commandList->Close();
+		assert(SUCCEEDED(result));
+		//コマンドリストの実行
+		ID3D12CommandList* commandLists[] = { commandList };
+		commandQueue->ExecuteCommandLists(1, commandLists);
+
+		//画面に表示するバッファをフリップ(表示の入れ替え)
+		result = swapChain->Present(1, 0);
+		assert(SUCCEEDED(result));
+
+		// コマンドの実行完了を待つ
+		commandQueue->Signal(fence, ++fenceVal);
+		if (fence->GetCompletedValue() != fenceVal)
+		{
+			HANDLE event = CreateEvent(nullptr, false, false, nullptr);
+			fence->SetEventOnCompletion(fenceVal, event);
+			WaitForSingleObject(event, INFINITE);
+			CloseHandle(event);
+		}
+
+		//キューをクリア
+		result = commandAllocator->Reset();
+		assert(SUCCEEDED(result));
+		//再びコマンドリストを貯める準備
+		result = commandList->Reset(commandAllocator, nullptr);
+		assert(SUCCEEDED(result));
+
+		//DirectX毎フレーム処理　ここまで
+	}
 
 	//ウィンドウクラスを登録解除
 	UnregisterClass(w.lpszClassName, w.hInstance);
