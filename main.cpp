@@ -261,16 +261,23 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
 	//------------------描画初期化処理　ここから----------------//
 
-	//頂点データ
-	XMFLOAT3 vertices[] =
+	//
+	struct Vertex
 	{
-		{ -0.5f, -0.5f, 0.0f },		//左下	インデックス0
-		{ -0.5f, +0.5f, 0.0f },		//左上  インデックス1
-		{ +0.5f, -0.5f, 0.0f },		//右下  インデックス2
-		{ +0.5f, +0.5f, 0.0f }		//右上	インデックス3
+		XMFLOAT3 pos;	//xyz座標
+		XMFLOAT2 uv;	//uv座標
+	};
+
+	//頂点データ 10
+	Vertex vertices[] =
+	{	//	x	  y		 z		 u		v
+		{{ -0.4f, -0.7f, 0.0f }, {0.0f,	1.0f}},	//左下
+		{{ -0.4f, +0.7f, 0.0f }, {0.0f,	0.0f}},	//左上 
+		{{ +0.4f, -0.7f, 0.0f }, {1.0f,	1.0f}},	//右下 
+		{{ +0.4f, +0.7f, 0.0f }, {1.0f, 0.0f}},	//右上
 	};
 	//頂点データ全体のサイズ = 頂点データの一つ分のサイズ * 頂点データの要素数
-	UINT sizeVB = static_cast<UINT>(sizeof(XMFLOAT3) * _countof(vertices));
+	UINT sizeVB = static_cast<UINT>(sizeof(vertices[0]) * _countof(vertices));
 
 	//頂点バッファの設定
 	D3D12_HEAP_PROPERTIES heapProp{};			//ヒープ設定
@@ -297,7 +304,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	assert(SUCCEEDED(result));
 
 	//GPU上のバッファに対応した仮想メモリ(メインメモリ上)を取得
-	XMFLOAT3* vertMap = nullptr;
+	Vertex* vertMap = nullptr;
 	result = vertBuff->Map(0, nullptr, (void**)&vertMap);
 	assert(SUCCEEDED(result));
 	//全頂点に対して
@@ -315,7 +322,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	//頂点バッファのサイズ
 	vbView.SizeInBytes = sizeVB;
 	//頂点1つ分のデータサイズ
-	vbView.StrideInBytes = sizeof(XMFLOAT3);
+	vbView.StrideInBytes = sizeof(vertices[0]);
 
 	ID3DBlob* vsBlob = nullptr;		//頂点シェーダオブジェクト
 	ID3DBlob* psBlob = nullptr;		//ピクセルシェーダオブジェクト
@@ -377,6 +384,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		{
 			"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,0,D3D12_APPEND_ALIGNED_ELEMENT,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
 		},
+		{
+			"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
+		},
 	};
 
 	//グラフィックスパイプライン設定
@@ -410,10 +420,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	blenddesc.SrcBlendAlpha = D3D12_BLEND_ONE;		//ソースの値を100%使う
 	blenddesc.DestBlendAlpha = D3D12_BLEND_ZERO;	//デストの値を0%使う
 
-	//加算合成
-	blenddesc.BlendOp = D3D12_BLEND_OP_ADD;		//加算
-	blenddesc.SrcBlend = D3D12_BLEND_ONE;		//ソースの値を100%使う
-	blenddesc.DestBlend = D3D12_BLEND_ONE;		//デストの値を100%使う
+	////加算合成
+	//blenddesc.BlendOp = D3D12_BLEND_OP_ADD;		//加算
+	//blenddesc.SrcBlend = D3D12_BLEND_ONE;		//ソースの値を100%使う
+	//blenddesc.DestBlend = D3D12_BLEND_ONE;		//デストの値を100%使う
 
 	//減算合成
 	//blenddesc.BlendOp = D3D12_BLEND_OP_REV_SUBTRACT;	//テストからソースを減算
@@ -426,9 +436,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	//blenddesc.DestBlend = D3D12_BLEND_ZERO;				//使わない
 
 	//半透明合成
-	//blenddesc.BlendOp = D3D12_BLEND_OP_ADD;				//加算
-	//blenddesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;			//ソースのアルファ値
-	//blenddesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;	//1.0f-ソースのアルファ値
+	blenddesc.BlendOp = D3D12_BLEND_OP_ADD;				//加算
+	blenddesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;			//ソースのアルファ値
+	blenddesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;	//1.0f-ソースのアルファ値
 
 	// 頂点レイアウトの設定
 	pipelineDesc.InputLayout.pInputElementDescs = inputLayout;
@@ -506,7 +516,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	constMapMaterial->color = XMFLOAT4(1, 0, 0, 0.5f);		//RGBAで半透明の赤
 
 	//インデックスデータ
-	uint16_t indices[] =
+	unsigned short indices[] =
 	{
 		0, 1, 2,	//三角形1つ目
 		1, 2, 3,	//三角形2つ目
@@ -551,7 +561,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	ibView.BufferLocation = indexBuff->GetGPUVirtualAddress();
 	ibView.Format = DXGI_FORMAT_R16_UINT;
 	ibView.SizeInBytes = sizeIB;
-	
+
+
+
 	//--------------描画初期化処理　ここまで---------------//
 
 
@@ -662,7 +674,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		commandList->IASetIndexBuffer(&ibView);
 
 		// 描画コマンド
-		commandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0 ,0); // 全ての頂点を使って描画
+		commandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0, 0); // 全ての頂点を使って描画
 
 		// 4 描画コマンドここまで
 
